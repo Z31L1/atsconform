@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <title>Privacy-First ATS Transformer & AI-Bridge</title>
+    <!-- jsPDF hinzugefügt -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <style>
         body { font-family: sans-serif; background: #1a1a1a; color: #eee; padding: 20px; }
@@ -12,9 +14,9 @@
 </head>
 <body>
     <input type="file" id="file-input" accept="application/pdf" />
-    <h3>Anonymisierter Text-Payload für Gemma:</h3>
+    <h3>Anonymisierter Text-Payload für KI:</h3>
     <textarea id="ai-input" placeholder="Text wird hier nach Extraktion und Anonymisierung erscheinen..."></textarea>
-    <button class="btn" id="btn-process">Daten an Gemma senden</button>
+    <button class="btn" id="btn-process">Daten an KI senden</button>
 
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -32,7 +34,6 @@
                     fullText += content.items.map(item => item.str).join(" ") + "\n";
                 }
                 
-                // Anonymisierungs-Layer: PII-Entfernung
                 const anonymizedText = anonymize(fullText);
                 document.getElementById('ai-input').value = anonymizedText;
             };
@@ -40,90 +41,69 @@
         });
 
         function anonymize(text) {
-            // Regex für E-Mail und einfache Telefonnummern
             return text
                 .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "[EMAIL_MASKED]")
                 .replace(/\+?\d{9,15}/g, "[PHONE_MASKED]");
         }
 
+        function toggleLoading(isLoading) {
+            const btn = document.getElementById('btn-process');
+            btn.disabled = isLoading;
+            btn.textContent = isLoading ? "KI strukturiert Daten..." : "Daten an KI senden";
+        }
+
         document.getElementById('btn-process').addEventListener('click', async () => {
             const text = document.getElementById('ai-input').value;
+            if (!text) return alert("Kein Text zum Verarbeiten.");
 
-            const response = await fetch('/api/process-resume', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text })
-            });
+            toggleLoading(true);
+            try {
+                const response = await fetch(/*'/api/process-resume'*/ 'https://itzy-tawny.vercel.app/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text })
+                });
 
-            const json = await response.json();
-            console.log("Strukturiertes JSON von Vercel:", json);
-             // Hier folgt dann das Rendering in dein ATS-PDF-Template
+                if (!response.ok) throw new Error("API-Fehler");
+                
+                const { data } = await response.json();
+                generateATSResume(data);
+            } catch (err) {
+                console.error(err);
+                alert("Fehler bei der Verarbeitung. Prüfe deine Vercel-Logs.");
+            } finally {
+                toggleLoading(false);
+            }
         });
 
-        // 1. UI-Helper für den Loading-State
-    function toggleLoading(isLoading) {
-        const btn = document.getElementById('btn-process');
-        btn.disabled = isLoading;
-        btn.textContent = isLoading ? "KI strukturiert Daten..." : "Daten an Gemma senden";
-    }
-
-    // 2. Integration in deinen Event-Listener
-    document.getElementById('btn-process').addEventListener('click', async () => {
-        const text = document.getElementById('ai-input').value;
-        if (!text) return alert("Kein Text zum Verarbeiten.");
-
-        toggleLoading(true);
-        try {
-            const response = await fetch('/api/process-resume', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text })
-            });
-
-            if (!response.ok) throw new Error("API-Fehler");
+        function generateATSResume(data) {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
             
-            const { data } = await response.json();
+            doc.setFontSize(20);
+            doc.text(data.basics?.name || "Name nicht gefunden", 20, 20);
             
-            // PDF-Generation triggern
-            generateATSResume(data);
-        } catch (err) {
-            console.error(err);
-            alert("Fehler bei der Verarbeitung. Prüfe deine Vercel-Logs.");
-        } finally {
-            toggleLoading(false);
-        }
-    });
-
-    // 3. Der PDF-Generator (Basis für dein ATS-Layout)
-    function generateATSResume(data) {
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF();
-        
-        // Header
-        doc.setFontSize(20);
-        doc.text(data.basics.name || "Name", 20, 20);
-        
-        // Berufserfahrung
-        doc.setFontSize(14);
-        doc.text("Berufserfahrung", 20, 40);
-        doc.setFontSize(10);
-        
-        let y = 50;
-        data.work.forEach(job => {
-            doc.text(`${job.position} | ${job.name} (${job.startDate} - ${job.endDate})`, 20, y);
-            y += 7;
-            // Highlights als Bullet-Points
-            if (job.highlights) {
-                job.highlights.forEach(h => {
-                    doc.text(`• ${h}`, 25, y);
-                    y += 5;
+            doc.setFontSize(14);
+            doc.text("Berufserfahrung", 20, 40);
+            doc.setFontSize(10);
+            
+            let y = 50;
+            if (data.work && Array.isArray(data.work)) {
+                data.work.forEach(job => {
+                    doc.text(`${job.position || ''} | ${job.name || ''} (${job.startDate || ''} - ${job.endDate || ''})`, 20, y);
+                    y += 7;
+                    if (job.highlights && Array.isArray(job.highlights)) {
+                        job.highlights.forEach(h => {
+                            doc.text(`• ${h}`, 25, y);
+                            y += 5;
+                        });
+                    }
+                    y += 10;
                 });
             }
-            y += 10;
-        });
 
-        doc.save('ats_resume.pdf');
-    }
+            doc.save('ats_resume.pdf');
+        }
     </script>
 </body>
 </html>
