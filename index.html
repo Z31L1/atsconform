@@ -69,48 +69,48 @@
     btnResponse.disabled = true;
 
     document.getElementById('file-input').addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file || file.type !== 'application/pdf') {
-        alert("Bitte eine gültige PDF-Datei auswählen!");
-        return;
-    }
-
-    btnProcess.disabled = true;
-    
-    const reader = new FileReader();
-    reader.onload = async function(event) {
-        try {
-            const pdf = await pdfjsLib.getDocument({data: new Uint8Array(event.target.result)}).promise;
-            let fullText = "";
-            
-            for (let i = 1; i <= pdf.numPages; i++) {
-                const page = await pdf.getPage(i);
-                const content = await page.getTextContent();
-                
-                const lines = {};
-                content.items.forEach(item => {
-                    const y = Math.round(item.transform[5] / 5) * 5;
-                    if (!lines[y]) lines[y] = [];
-                    lines[y].push(item);
-                });
-
-                const sortedY = Object.keys(lines).sort((a, b) => b - a);
-                sortedY.forEach(y => {
-                    lines[y].sort((a, b) => a.transform[4] - b.transform[4]);
-                    fullText += lines[y].map(item => item.str).join(" ") + " ";
-                });
-                fullText += "\n";
-            }
-            document.getElementById('ai-input').value = anonymize(fullText);
-            btnProcess.disabled = false;
-            btnResponse.disabled = false;
-        } catch (err) {
-            console.error("PDF Parsing Fehlgeschlagen:", err);
-            alert("Fehler beim Lesen des PDFs.");
+        const file = e.target.files[0];
+        if (!file || file.type !== 'application/pdf') {
+            alert("Bitte eine gültige PDF-Datei auswählen!");
+            return;
         }
-    };
-    reader.readAsArrayBuffer(file);
-});
+
+        btnProcess.disabled = true;
+        
+        const reader = new FileReader();
+        reader.onload = async function(event) {
+            try {
+                const pdf = await pdfjsLib.getDocument({data: new Uint8Array(event.target.result)}).promise;
+                let fullText = "";
+                
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const content = await page.getTextContent();
+                    
+                    const lines = {};
+                    content.items.forEach(item => {
+                        const y = Math.round(item.transform[5] / 5) * 5;
+                        if (!lines[y]) lines[y] = [];
+                        lines[y].push(item);
+                    });
+
+                    const sortedY = Object.keys(lines).sort((a, b) => b - a);
+                    sortedY.forEach(y => {
+                        lines[y].sort((a, b) => a.transform[4] - b.transform[4]);
+                        fullText += lines[y].map(item => item.str).join(" ") + " ";
+                    });
+                    fullText += "\n";
+                }
+                document.getElementById('ai-input').value = anonymize(fullText);
+                btnProcess.disabled = false;
+                btnResponse.disabled = false;
+            } catch (err) {
+                console.error("PDF Parsing Fehlgeschlagen:", err);
+                alert("Fehler beim Lesen des PDFs.");
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    });
 
     const maskMap = {
         name: "",
@@ -157,7 +157,6 @@
         if (!text) return alert("Kein Text zum Verarbeiten.");
 
         toggleLoading(true);
-        await new Promise((resolve) => setTimeout(resolve, 0));
         try {
             const response = await fetch('/api/process-resume', {
                 method: 'POST',
@@ -185,24 +184,23 @@
             return;
         }
         
-    try {
-        const firstBracket = jsonInput.indexOf('{');
-        const lastBracket = jsonInput.lastIndexOf('}');
-        const cleanJson = jsonInput.substring(firstBracket, lastBracket + 1);
-        
-        const data = JSON.parse(cleanJson);
-        await generateATSResume(data);
-    } catch (err) {
-        console.error("Fatal Parsing Error:", err);
-        alert("JSON ist invalide oder PDF-Buffer beschädigt.");
-    }
-});
+        try {
+            const firstBracket = jsonInput.indexOf('{');
+            const lastBracket = jsonInput.lastIndexOf('}');
+            const cleanJson = jsonInput.substring(firstBracket, lastBracket + 1);
+            
+            const data = JSON.parse(cleanJson);
+            await generateATSResume(data);
+        } catch (err) {
+            console.error("Fatal Parsing Error:", err);
+            alert("JSON ist invalide oder PDF-Buffer beschädigt.");
+        }
+    });
 
     async function generateATSResume(data) {
         const file = document.getElementById('file-input').files[0];
         const arrayBuffer = await file.arrayBuffer();
         const pdfBytes = new Uint8Array(arrayBuffer);
-        console.log("PdfBytes length:", pdfBytes.length);
         const { PDFDocument, rgb, StandardFonts } = PDFLib;
 
         if (data.basics) {
@@ -319,12 +317,12 @@
     });
 
     document.getElementById('btn-motivation-mask-names').addEventListener('click', () => {
-            const jdInput = document.getElementById('jd-ai-input');
-            const aiInput = document.getElementById('motivation-ai-input');
-            const namesToMask = document.getElementById('motivation-name-input').value.split(',');
-            maskMap.name = namesToMask.join(','); 
-            
-            [aiInput, jdInput].forEach(inputField => {
+        const jdInput = document.getElementById('jd-ai-input');
+        const aiInput = document.getElementById('motivation-ai-input');
+        const namesToMask = document.getElementById('motivation-name-input').value.split(',');
+        maskMap.name = namesToMask.join(','); 
+        
+        [aiInput, jdInput].forEach(inputField => {
             if (!inputField || !inputField.value) return;
             
             let text = inputField.value;
@@ -350,28 +348,6 @@
         });
     });
 
-    // CODEVERDOPPELUNG ENTGEGEN JEDER LOGIK BEIBEHALTEN:
-    document.getElementById('btn-match').addEventListener('click', async () => {
-        const cvText = document.getElementById('motivation-ai-input').value; 
-        const jdText = document.getElementById('jd-ai-input').value; 
-
-        if (!cvText || !jdText) {
-            alert("Bitte stelle sicher, dass sowohl Lebenslauf als auch JD extrahiert wurden!");
-            return;
-        }
-
-        const combinedContent = `--- ANALYSE-REPORT ---\n\n` +
-                                `[LEBENSLAUF DATEN]\n${cvText}\n\n` +
-                                `[STELLENAUSSCHREIBUNG]\n${jdText}`;
-        
-        showPreview(combinedContent);
-    });
-
-    function showPreview(text) {
-        document.getElementById('motivation-full-text').value = text;
-        document.getElementById('motivation-preview-layer').style.display = 'block';
-    }
-
     document.getElementById('jd-file-input').addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file || file.type !== 'application/pdf') return;
@@ -394,7 +370,8 @@
         reader.readAsArrayBuffer(file);
     });
 
-    document.getElementById('btn-match').addEventListener('click', () => {
+    // BEREINIGTER EINZELNER EVENT-LISTENER MIT ECHTEM BACKEND-FETCH:
+    document.getElementById('btn-match').addEventListener('click', async () => {
         const cvContent = document.getElementById('motivation-ai-input').value; 
         const jdContent = document.getElementById('jd-ai-input').value; 
 
@@ -403,12 +380,31 @@
             return;
         }
 
-        const previewArea = document.getElementById('motivation-full-text');
-        if (previewArea) {
-            previewArea.value = "--- LEBENSLAUF ---\n" + cvContent + "\n\n--- STELLENAUSSCHREIBUNG ---\n" + jdContent;
-            document.getElementById('motivation-preview-layer').style.display = 'block';
-        } else {
-            console.error("Preview-Layer konnte nicht gefunden werden.");
+        const combinedContent = `--- ANALYSE-REPORT ---\n\n` +
+                                `[LEBENSLAUF DATEN]\n${cvContent}\n\n` +
+                                `[STELLENAUSSCHREIBUNG]\n${jdContent}`;
+        
+        const btn = document.getElementById('btn-match');
+        btn.disabled = true;
+        btn.textContent = "KI generiert Analyse...";
+
+        try {
+            const response = await fetch('/api/process-resume', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: combinedContent, mode: 'matching' })
+            });
+
+            if (!response.ok) throw new Error("API-Fehler beim Matching-Aufruf");
+            
+            const { data } = await response.json();
+            renderDeMaskedPreview(data.rawText);
+        } catch (err) {
+            console.error(err);
+            alert("Fehler bei der Matching-Verarbeitung.");
+        } finally {
+            btn.disabled = false;
+            btn.textContent = "Übereinstimmungen prüfen & Text generieren";
         }
     });
 
@@ -429,12 +425,6 @@
         previewArea.value = finalDraft;
         document.getElementById('motivation-preview-layer').style.display = 'block';
     }
-
-    document.getElementById('btn-match').addEventListener('click', () => {
-        const draftText = document.getElementById('motivation-full-text').value; 
-        renderDeMaskedPreview(draftText);
-    });
-
 </script>
 </body>
 </html>
