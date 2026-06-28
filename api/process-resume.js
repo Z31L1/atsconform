@@ -17,7 +17,7 @@ export default async function handler(req, res) {
         }
 
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-        const modelId = "gemma-4-31b-it"; 
+        const modelId = "gemini-2.5-flash"; 
         
         let systemPromptText = "";
         let configOptions = {
