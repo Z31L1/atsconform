@@ -3,8 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Privacy-First ATS Transformer & AI-Bridge</title>
-    <!-- jsPDF hinzugefügt -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <style>
         body { font-family: sans-serif; background: #1a1a1a; color: #eee; padding: 20px; }
@@ -15,95 +14,219 @@
 <body>
     <input type="file" id="file-input" accept="application/pdf" />
     <h3>Anonymisierter Text-Payload für KI:</h3>
+    <h3>Manuelle Anonymisierung Namen eingeben: !ACHTUNG REIHENFOLGE Wichtig! VORNAME NACHNAME, NACHNAME VORNAME beachten </h3>
+    <input type="text" id="manual-name-input" placeholder="z.B. Max Mustermann, Erika Musterfrau" style="width: 100%;" />
+    <button class="btn" id="btn-mask-names">Namen maskieren</button>
     <textarea id="ai-input" placeholder="Text wird hier nach Extraktion und Anonymisierung erscheinen..."></textarea>
     <button class="btn" id="btn-process">Daten an KI senden</button>
+    
+    <h3>Test-Input (Manuelle KI Antwort):</h3>
+    <textarea id="ki-response" placeholder="JSON hier einfügen..."></textarea>
+    <button class="btn" id="btn-response">manuelle KI antwort senden</button>
 
-    <script>
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+<script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    
 
-        document.getElementById('file-input').addEventListener('change', async (e) => {
-            const file = e.target.files[0];
-            const reader = new FileReader();
-            reader.onload = async function() {
-                const pdf = await pdfjsLib.getDocument({data: new Uint8Array(this.result)}).promise;
-                let fullText = "";
+    const btnProcess = document.getElementById('btn-process');
+    const btnResponse = document.getElementById('btn-response');
+
+    btnProcess.disabled = true;
+    btnResponse.disabled = true;
+
+    document.getElementById('file-input').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file || file.type !== 'application/pdf') {
+        alert("Bitte eine gültige PDF-Datei auswählen!");
+        return;
+    }
+
+    btnProcess.disabled = true;
+    
+    const reader = new FileReader();
+    reader.onload = async function(event) {
+        // 2. Jetzt das PDF für die Textextraktion parsen
+        try {
+            const pdf = await pdfjsLib.getDocument({data: new Uint8Array(event.target.result)}).promise;
+            let fullText = "";
+            
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
                 
-                for (let i = 1; i <= pdf.numPages; i++) {
-                    const page = await pdf.getPage(i);
-                    const content = await page.getTextContent();
-                    fullText += content.items.map(item => item.str).join(" ") + "\n";
-                }
-                
-                const anonymizedText = anonymize(fullText);
-                document.getElementById('ai-input').value = anonymizedText;
-            };
-            reader.readAsArrayBuffer(file);
-        });
-
-        function anonymize(text) {
-            return text
-                .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "[EMAIL_MASKED]")
-                .replace(/\+?\d{9,15}/g, "[PHONE_MASKED]");
-        }
-
-        function toggleLoading(isLoading) {
-            const btn = document.getElementById('btn-process');
-            btn.disabled = isLoading;
-            btn.textContent = isLoading ? "KI strukturiert Daten..." : "Daten an KI senden";
-        }
-
-        document.getElementById('btn-process').addEventListener('click', async () => {
-            const text = document.getElementById('ai-input').value;
-            if (!text) return alert("Kein Text zum Verarbeiten.");
-
-            toggleLoading(true);
-            try {
-                const response = await fetch(/*'/api/process-resume'*/ 'https://itzy-tawny.vercel.app/', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text })
+                const lines = {};
+                content.items.forEach(item => {
+                    const y = Math.round(item.transform[5] / 5) * 5;
+                    if (!lines[y]) lines[y] = [];
+                    lines[y].push(item);
                 });
 
-                if (!response.ok) throw new Error("API-Fehler");
-                
-                const { data } = await response.json();
-                generateATSResume(data);
-            } catch (err) {
-                console.error(err);
-                alert("Fehler bei der Verarbeitung. Prüfe deine Vercel-Logs.");
-            } finally {
-                toggleLoading(false);
+                const sortedY = Object.keys(lines).sort((a, b) => b - a);
+                sortedY.forEach(y => {
+                    lines[y].sort((a, b) => a.transform[4] - b.transform[4]);
+                    fullText += lines[y].map(item => item.str).join(" ") + " ";
+                });
+                fullText += "\n";
+            }
+            document.getElementById('ai-input').value = anonymize(fullText);
+            btnProcess.disabled = false;
+            btnResponse.disabled = false;
+        } catch (err) {
+            console.error("PDF Parsing Fehlgeschlagen:", err);
+            alert("Fehler beim Lesen des PDFs.");
+        }
+    };
+    reader.readAsArrayBuffer(file);
+});
+
+    const maskMap = {
+        name: "",
+        email: "",
+        phone: ""
+    };
+
+    function anonymize(text) {
+        return text
+        .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, (match) => {
+            maskMap.email = match; 
+            return "[EMAIL_MASKED]";
+        })
+        .replace(/\+?\d{9,15}/g, (match) => {
+            maskMap.phone = match; 
+            return "[PHONE_MASKED]";
+        });
+    }
+
+    document.getElementById('btn-mask-names').addEventListener('click', () => {
+        const aiInput = document.getElementById('ai-input');
+        const namesToMask = document.getElementById('manual-name-input').value.split(',');
+        maskMap.name = namesToMask.join(','); 
+        let text = aiInput.value;
+        
+        namesToMask.forEach(name => {
+            const trimmedName = name.trim();
+            if (trimmedName.length > 0) {
+                const regex = new RegExp(trimmedName, 'gi');
+                text = text.replace(regex, "[NAME_MASKED]");
             }
         });
+        aiInput.value = text;
+    });
 
-        function generateATSResume(data) {
-            const { jsPDF } = window.jspdf;
-            const doc = new jsPDF();
-            
-            doc.setFontSize(20);
-            doc.text(data.basics?.name || "Name nicht gefunden", 20, 20);
-            
-            doc.setFontSize(14);
-            doc.text("Berufserfahrung", 20, 40);
-            doc.setFontSize(10);
-            
-            let y = 50;
-            if (data.work && Array.isArray(data.work)) {
-                data.work.forEach(job => {
-                    doc.text(`${job.position || ''} | ${job.name || ''} (${job.startDate || ''} - ${job.endDate || ''})`, 20, y);
-                    y += 7;
-                    if (job.highlights && Array.isArray(job.highlights)) {
-                        job.highlights.forEach(h => {
-                            doc.text(`• ${h}`, 25, y);
-                            y += 5;
-                        });
-                    }
-                    y += 10;
-                });
-            }
+    function toggleLoading(isLoading) {
+        const btn = document.getElementById('btn-process');
+        btn.disabled = isLoading;
+        btn.textContent = isLoading ? "KI strukturiert Daten..." : "Daten an KI senden";
+    }
 
-            doc.save('ats_resume.pdf');
+    document.getElementById('btn-process').addEventListener('click', async () => {
+        const text = document.getElementById('ai-input').value;
+        if (!text) return alert("Kein Text zum Verarbeiten.");
+
+        toggleLoading(true);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        try {
+            const response = await fetch('/api/process-resume', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text })
+            });
+
+            if (!response.ok) throw new Error("API-Fehler");
+            
+            const { data } = await response.json();
+            await generateATSResume(data, originalPdfBytes);
+        } catch (err) {
+            console.error(err);
+            alert("Fehler bei der Verarbeitung.");
+        } finally {
+            toggleLoading(false);
         }
-    </script>
+    });
+
+    document.getElementById('btn-response').addEventListener('click', async () => {
+        const jsonInput = document.getElementById('ki-response').value;
+        
+        if (!jsonInput) {
+            alert("Das Textfeld ist leer!");
+            return;
+        }
+        
+
+    try {
+        const firstBracket = jsonInput.indexOf('{');
+        const lastBracket = jsonInput.lastIndexOf('}');
+        const cleanJson = jsonInput.substring(firstBracket, lastBracket + 1);
+        
+        const data = JSON.parse(cleanJson);
+        
+        // 2. Explizite Übergabe des validierten Buffers
+        await generateATSResume(data);
+    } catch (err) {
+        console.error("Fatal Parsing Error:", err);
+        alert("JSON ist invalide oder PDF-Buffer beschädigt.");
+    }
+});
+
+    // NEUE KERNFUNKTION: PDF-LIB AST INJECTION
+    async function generateATSResume(data) {
+        const file = document.getElementById('file-input').files[0];
+        const arrayBuffer = await file.arrayBuffer();
+        const pdfBytes = new Uint8Array(arrayBuffer);
+        console.log("PdfBytes length:", pdfBytes.length);
+        const { PDFDocument, rgb, StandardFonts } = PDFLib;
+
+        // 1. De-Maskierung der privaten Daten im lokalen Client-Kontext
+        if (data.basics) {
+            if (data.basics.name === "[NAME_MASKED]") data.basics.name = maskMap.name || "";
+            if (data.basics.email === "[EMAIL_MASKED]") data.basics.email = maskMap.email || "";
+            if (data.basics.phone === "[PHONE_MASKED]") data.basics.phone = maskMap.phone || "";
+        }
+
+        // 2. Original-PDF in den Arbeitsspeicher laden
+        const pdfDoc = await PDFDocument.load(pdfBytes);
+        const pages = pdfDoc.getPages();
+        const firstPage = pages[0]; 
+
+        // 3. Metadaten für den ATS-Parser setzen
+        pdfDoc.setTitle('Lebenslauf ' + (data.basics?.name || 'Bewerber'));
+        pdfDoc.setSubject('Bewerbungsunterlagen - Qualifiziertes Profil');
+        pdfDoc.setAuthor(data.basics?.name || 'Bewerber');
+        pdfDoc.setKeywords(data.skills && data.skills.length > 0 ? data.skills : ['Lebenslauf', 'Professional']);
+        pdfDoc.setCreator('AI-Bridge-ATS Privacy Edition');
+
+        // 4. ATS-Ghost-Layer strukturieren
+        const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+        let atsTextStream = `Lebenslauf von ${data.basics?.name || ''}\n`;
+        atsTextStream += `Skills: ${data.skills ? data.skills.join(', ') : ''}\n`;
+        
+        if (data.work && Array.isArray(data.work)) {
+            data.work.forEach(job => {
+                atsTextStream += `${job.position || ''} bei ${job.name || ''} (${job.startDate || ''} - ${job.endDate || ''})\n`;
+                if (job.highlights) atsTextStream += job.highlights.join(' ') + '\n';
+            });
+        }
+
+        // 5. Injektion des unsichtbaren Textes (Opacity 0)
+        firstPage.drawText(atsTextStream, {
+            x: 10,
+            y: firstPage.getHeight() - 30,
+            size: 5, 
+            font: font,
+            color: rgb(0, 0, 0),
+            opacity: 0.01, // Nahezu unsichtbar, aber zu 100% maschinenlesbar
+            lineHeight: 2,
+            maxWidth: firstPage.getWidth() - 20
+        });
+
+        // 6. Speichern und Download triggern
+        const modifiedPdfBytes = await pdfDoc.save();
+        const blob = new Blob([modifiedPdfBytes], { type: 'application/pdf' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `ATS_Resume_${(data.basics?.name || 'Profil').replace(/\s+/g, '_')}.pdf`;
+        link.click();
+    }
+</script>
 </body>
 </html>
