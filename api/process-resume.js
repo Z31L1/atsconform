@@ -1,73 +1,126 @@
 export default async function handler(req, res) {
-    // CORS-Preflight-Check & Method-Validation (Prüfung, ob der HTTP-Aufruf zulässig ist)
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Methode nicht erlaubt. Verwende POST.' });
     }
 
-    const { text } = req.body;
+    const { text, mode } = req.body; 
 
-    // Null-Pointer-Prävention (Verhinderung von Fehlern durch leere Variablen)
     if (!text) {
         return res.status(400).json({ error: 'Fehlender Text-Payload aus dem Frontend.' });
     }
 
     try {
-        const apiKey = process.env.GEMINI_API_KEY; // Zwingend den GEMINI_API_KEY in Vercel hinterlegen!
+        const apiKey = process.env.GEMINI_API_KEY; 
         if (!apiKey) {
             throw new Error("GEMINI_API_KEY fehlt in den Umgebungsvariablen.");
         }
 
-        // Asynchroner Call an die OpenAI-kompatible OpenRouter API
-        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        const modelId = "gemma-4-31b-it";
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`;
+
+        const generationConfig = {
+            temperature: 0.1,
+            thinkingConfig: {
+                thinkingLevel: "HIGH"
+            }
+        };
+
+        let systemPromptText = "";
+
+        if (mode === 'lebenslauf') {
+            systemPromptText = `Du bist ein ATS-Daten-Experte. Wandle den Lebenslauf-Text in ein exaktes JSON-Objekt um.\n\nANWEISUNGEN:\n1. "work": Übernimm die von dir erkannten Felder. Stelle sicher, dass Aufgaben als Liste im "highlights"-Array landen.\n2. "education": Nutze deine erkannten Felder "institution", "title" (Degree) und "period".\n3. "skills": Extrahiere ALLE technischen Kenntnisse (Hard Skills, Frameworks, Software) aus dem Text in ein flaches Array.\n4. Platzhalter: Ersetze gefundene Kontaktdaten strikt durch [NAME_MASKED], [EMAIL_MASKED], [PHONE_MASKED].\n5. Ausgabe: Gib NUR das JSON aus. Keine Erklärungen.`;
+
+            generationConfig.responseMimeType = "application/json";
+            generationConfig.responseSchema = {
+                type: "object",
+                properties: {
+                    basics: {
+                        type: "object",
+                        properties: {
+                            name: { type: "string" },
+                            email: { type: "string" },
+                            phone: { type: "string" }
+                        },
+                        required: ["name", "email", "phone"]
+                    },
+                    work: {
+                        type: "array",
+                        items: {
+                            type: "object",
+                            properties: {
+                                name: { type: "string" },
+                                position: { type: "string" },
+                                startDate: { type: "string" },
+                                endDate: { type: "string" },
+                                highlights: { type: "array", items: { type: "string" } }
+                            }
+                        }
+                    },
+                    education: {
+                        type: "array",
+                        items: {
+                            type: "object",
+                            properties: {
+                                institution: { type: "string" },
+                                title: { type: "string" },
+                                period: { type: "string" }
+                            }
+                        }
+                    },
+                    skills: {
+                        type: "array",
+                        items: { type: "string" }
+                    }
+                },
+                required: ["basics", "work", "education", "skills"]
+            };
+
+        } else if (mode === 'matching') {
+            systemPromptText = `Du bist ein präziser HR-Analyst. Analysiere den bereitgestellten Text (Lebenslauf / Jobanforderungen) und erstelle eine Matching-Analyse.\nDu musst EXAKT das folgende Textformat für deine Ausgabe einhalten. Ersetze die Werte in den eckigen Klammern durch die realen Analyseergebnisse. Verwende keine JavaScript-Variablen-Platzhalter wie \${...} in deiner finalen Ausgabe, sondern reinen Text!\n\n--- MATCHING-ANALYSE ---\nÜbereinstimmung: [Berechneter Prozentwert]%\n\nGEFUNDENE SKILLS:\n[Liste der gefundenen Skills, kommagetrennt]\n\nFEHLENDE SKILLS:\n[Liste der fehlenden Skills, kommagetrennt]\n\nVORSCHLAG FÜR MOTIVATIONSSCHREIBEN:\n[Generierter, professioneller Text für das Motivationsschreiben]`;
+        } else {
+            return res.status(400).json({ error: "Ungültiger Modus. Erlaubt sind 'lebenslauf' oder 'matching'." });
+        }
+
+        const response = await fetch(url, {
             method: "POST",
             headers: {
-                "Authorization": `Bearer ${apiKey}`,
-                "HTTP-Referer": "https://dein-vercel-projekt-url.vercel.app", // Empfohlen für OpenRouter
-                "X-Title": "ATS Privacy Pipeline", 
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                model: "google/gemma-4-31b-it",
-                // Deterministic Output Enforcement (Erzwingen einer vorhersehbaren, maschinenlesbaren Antwort)
-                response_format: { type: "json_object" }, 
-                messages: [
-                    {
-                        role: "system",
-                        content: `Du bist ein hochpräziser ATS-Daten-Extraktor. 
-                        Deine einzige Aufgabe ist es, den Text in striktes JSON zu parsen.
-                        Verwende EXAKT dieses Schema: { "basics": { "name": "string" }, "work": [ { "name": "string", "position": "string", "startDate": "string", "endDate": "string", "highlights": ["string"] } ] }.
-                        Antworte AUSSCHLIESSLICH mit validem JSON, ohne Markdown, ohne Erklärungen.`
-                    },
+                contents: [
                     {
                         role: "user",
-                        content: `Hier ist der Lebenslauf:\n\n${text}`
+                        parts: [{ text: `Lebenslauf: ${text}` }]
                     }
                 ],
-                temperature: 0.1 // Minimierung der Halluzinations-Wahrscheinlichkeit
+                generationConfig: generationConfig,
+                systemInstruction: {
+                    parts: [{ text: systemPromptText }]
+                }
             })
         });
 
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Google API Status ${response.status}: ${errorText}`);
+        }
+
         const data = await response.json();
         
-        // Error-Propagation (Weiterleiten von API-Fehlern an das Frontend)
-        if (data.error) {
-            console.error("OpenRouter API Error:", data.error);
-            return res.status(502).json({ error: data.error.message || "Bad Gateway beim LLM-Provider" });
+        if (!data.candidates || data.candidates.length === 0) {
+            throw new Error("Ungültige API-Response: Keine Inferenz-Kandidaten vorhanden.");
         }
 
-        const llmResponseText = data.choices[0].message.content;
+        const llmResponseText = data.candidates[0].content.parts[0].text;
         
-        // Deserialisierung (Rückumwandlung des Text-Strings in ein JavaScript-Objekt)
-        let parsedData;
-        try {
-            parsedData = JSON.parse(llmResponseText.trim());
-        } catch (parseErr) {
-            // Fallback-Scrubbing (Bereinigung, falls das Modell trotz Verbots Markdown-Tags liefert)
-            const scrubbedText = llmResponseText.replace(/```json/gi, '').replace(/```/g, '').trim();
-            parsedData = JSON.parse(scrubbedText);
+        let responseData;
+        if (mode === 'lebenslauf') {
+            responseData = JSON.parse(llmResponseText.trim());
+        } else {
+            responseData = { rawText: llmResponseText };
         }
 
-        return res.status(200).json({ data: parsedData });
+        return res.status(200).json({ data: responseData });
 
     } catch (error) {
         console.error("Kritischer Backend Fehler:", error.message);

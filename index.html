@@ -8,10 +8,18 @@
     <style>
         body { font-family: sans-serif; background: #1a1a1a; color: #eee; padding: 20px; }
         textarea { width: 100%; height: 200px; background: #2d2d2d; color: #00ff00; border: 1px solid #444; }
-        .btn { padding: 10px 20px; cursor: pointer; background: #007acc; color: white; border: none; }
+        .btn { padding: 10px 20px; cursor: pointer; background: #007acc; color: white; border: none; margin: 5px 0; }
+        .btn:disabled { background: #555; cursor: not-allowed; }
+        #motivation-preview-layer { margin-top: 20px; background: #222; padding: 15px; border: 1px dashed #007acc; }
     </style>
 </head>
 <body>
+    <div id="mode-switcher">
+    <button class="btn" onclick="switchMode('ats')">ATS-Optimierung</button>
+    <button class="btn" onclick="switchMode('motivation')">Motivationsschreiben</button>
+    </div>
+    <div id="ats-container">
+    <h3>ATS Lebenslauf Generator</h3>
     <input type="file" id="file-input" accept="application/pdf" />
     <h3>Anonymisierter Text-Payload für KI:</h3>
     <h3>Manuelle Anonymisierung Namen eingeben: !ACHTUNG REIHENFOLGE Wichtig! VORNAME NACHNAME, NACHNAME VORNAME beachten </h3>
@@ -19,12 +27,33 @@
     <button class="btn" id="btn-mask-names">Namen maskieren</button>
     <textarea id="ai-input" placeholder="Text wird hier nach Extraktion und Anonymisierung erscheinen..."></textarea>
     <button class="btn" id="btn-process">Daten an KI senden</button>
-    
+
     <h3>Test-Input (Manuelle KI Antwort):</h3>
     <textarea id="ki-response" placeholder="JSON hier einfügen..."></textarea>
     <button class="btn" id="btn-response">manuelle KI antwort senden</button>
+    </div>
+    <div id="motivation-container">
+    <h3>Motivationsschreiben-Generator</h3>
+    <input type="file" id="motivation-file-input" accept="application/pdf" />
+    <input type="text" id="motivation-name-input" placeholder="Namen eingeben..." style="width: 100%;" />
+    <button class="btn" id="btn-motivation-mask-names">Namen maskieren</button>
+    <textarea id="motivation-ai-input" placeholder="Text erscheint hier..."></textarea>
+    <h3>Stellenausschreibung PDF</h3>
+    <input type="file" id="jd-file-input" accept="application/pdf" />
+    <textarea id="jd-ai-input" placeholder="Text der Stellenausschreibung erscheint hier..."></textarea>
+    <button class="btn" id="btn-match">Übereinstimmungen prüfen & Text generieren</button>
+    <div id="match-results"></div>
+    </div>
 
-<script>
+    <script>
+    document.getElementById('ats-container').style.display = 'none';
+    document.getElementById('motivation-container').style.display = 'none';
+    
+    function switchMode(mode) {
+        document.getElementById('ats-container').style.display = mode === 'ats' ? 'block' : 'none';
+        document.getElementById('motivation-container').style.display = mode === 'motivation' ? 'block' : 'none';
+    }
+
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     
 
@@ -129,13 +158,13 @@
             const response = await fetch('/api/process-resume', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text })
+                body: JSON.stringify({ text, mode: 'lebenslauf' })
             });
 
-            if (!response.ok) throw new Error("API-Fehler");
+            if (!response.ok) throw new Error("API-Fehler instanzaufruf");
             
             const { data } = await response.json();
-            await generateATSResume(data, originalPdfBytes);
+            await generateATSResume(data);
         } catch (err) {
             console.error(err);
             alert("Fehler bei der Verarbeitung.");
@@ -227,6 +256,216 @@
         link.download = `ATS_Resume_${(data.basics?.name || 'Profil').replace(/\s+/g, '_')}.pdf`;
         link.click();
     }
+
+    // SCRIPT FÜR MATCHING UND MOTIVATIONSSCHREIBEN
+    //
+    //
+    //
+    //
+    //
+
+    let cvUploaded = false;
+let jdUploaded = false;
+const btnMask = document.getElementById('btn-motivation-mask-names');
+
+// Button initial sperren
+btnMask.disabled = true;
+
+
+// Funktion zum Prüfen des Button-Status
+function checkMotivationReady() {
+    if (cvUploaded && jdUploaded) {
+        btnMask.disabled = false;
+    }
+}
+
+// 1. Lebenslauf Upload Listener (im Motivations-Modul)
+document.getElementById('motivation-file-input').addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+        cvUploaded = true;
+        checkMotivationReady();
+    }
+});
+
+// 2. Stellenausschreibung Upload Listener
+document.getElementById('jd-file-input').addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+        jdUploaded = true;
+        checkMotivationReady();
+    }
+});
+
+document.getElementById('motivation-file-input').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file || file.type !== 'application/pdf') {
+        alert("Bitte eine gültige PDF-Datei auswählen!");
+        return;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = async function(event) {
+        // 2. Jetzt das PDF für die Textextraktion parsen
+        try {
+            const pdf = await pdfjsLib.getDocument({data: new Uint8Array(event.target.result)}).promise;
+            let fullText = "";
+            
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+                
+                const lines = {};
+                content.items.forEach(item => {
+                    const y = Math.round(item.transform[5] / 5) * 5;
+                    if (!lines[y]) lines[y] = [];
+                    lines[y].push(item);
+                });
+
+                const sortedY = Object.keys(lines).sort((a, b) => b - a);
+                sortedY.forEach(y => {
+                    lines[y].sort((a, b) => a.transform[4] - b.transform[4]);
+                    fullText += lines[y].map(item => item.str).join(" ") + " ";
+                });
+                fullText += "\n";
+            }
+            document.getElementById('motivation-ai-input').value = anonymize(fullText);
+        
+        } catch (err) {
+            console.error("PDF Parsing Fehlgeschlagen:", err);
+            alert("Fehler beim Lesen des PDFs.");
+        }
+    };
+    reader.readAsArrayBuffer(file);
+});
+
+document.getElementById('btn-motivation-mask-names').addEventListener('click', () => {
+        const jdInput = document.getElementById('jd-ai-input');
+        const aiInput = document.getElementById('motivation-ai-input');
+        const namesToMask = document.getElementById('motivation-name-input').value.split(',');
+        maskMap.name = namesToMask.join(','); 
+        
+        [aiInput, jdInput].forEach(inputField => {
+        if (!inputField || !inputField.value) return;
+        
+        let text = inputField.value;
+
+        // E-Mail und Telefon maskieren, falls vorhanden
+        if (maskMap.email) {
+            const emailRegex = new RegExp(maskMap.email, 'gi');
+            text = text.replace(emailRegex, "[EMAIL_MASKED]");
+        }
+        if (maskMap.phone) {
+            const phoneRegex = new RegExp(maskMap.phone, 'gi');
+            text = text.replace(phoneRegex, "[PHONE_MASKED]");
+        }
+        
+        // Namen maskieren[cite: 3]
+        namesToMask.forEach(name => {
+            const trimmedName = name.trim();
+            if (trimmedName.length > 0) {
+                const regex = new RegExp(trimmedName, 'gi');
+                text = text.replace(regex, "[NAME_MASKED]");
+            }
+        });
+        
+        inputField.value = text;
+    });
+});
+
+document.getElementById('btn-match').addEventListener('click', async () => {
+    const cvText = document.getElementById('motivation-ai-input').value; // Lebenslauf-Daten
+    const jdText = document.getElementById('jd-ai-input').value; // JD-Daten
+
+    if (!cvText || !jdText) {
+        alert("Bitte stelle sicher, dass sowohl Lebenslauf als auch JD extrahiert wurden!");
+        return;
+    }
+
+    // Kombinierte Anzeige in der Vorschau
+    const combinedContent = `--- ANALYSE-REPORT ---\n\n` +
+                            `[LEBENSLAUF DATEN]\n${cvText}\n\n` +
+                            `[STELLENAUSSCHREIBUNG]\n${jdText}`;
+    
+    // Aufruf der Preview-Funktion
+    showPreview(combinedContent);
+});
+
+// Stelle sicher, dass die showPreview-Funktion existiert
+function showPreview(text) {
+    document.getElementById('motivation-full-text').value = text;
+    document.getElementById('motivation-preview-layer').style.display = 'block';
+}
+
+document.getElementById('jd-file-input').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file || file.type !== 'application/pdf') return;
+
+    const reader = new FileReader();
+    reader.onload = async function(event) {
+        try {
+            const pdf = await pdfjsLib.getDocument({data: new Uint8Array(event.target.result)}).promise;
+            let jdText = "";
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+                jdText += content.items.map(item => item.str).join(" ") + "\n";
+            }
+            // Zuweisung an das Feld im Motivations-Container
+            document.getElementById('jd-ai-input').value = jdText;
+        } catch (err) {
+            console.error("JD Parsing fehlgeschlagen:", err);
+        }
+    };
+    reader.readAsArrayBuffer(file);
+});
+
+   document.getElementById('btn-match').addEventListener('click', () => {
+    const cvContent = document.getElementById('motivation-ai-input').value; // Extrahiert aus dem Lebenslauf-Teil
+    const jdContent = document.getElementById('jd-ai-input').value; // Extrahiert aus der JD
+
+    if (!cvContent || !jdContent) {
+        alert("Fehler: Eines der Dokumente ist noch nicht geladen.");
+        return;
+    }
+
+    // Anzeige im Preview-Layer (Voraussetzung: motivation-preview-layer existiert im HTML)
+    const previewArea = document.getElementById('motivation-full-text');
+    if (previewArea) {
+        previewArea.value = "--- LEBENSLAUF ---\n" + cvContent + "\n\n--- STELLENAUSSCHREIBUNG ---\n" + jdContent;
+        document.getElementById('motivation-preview-layer').style.display = 'block';
+    } else {
+        console.error("Preview-Layer konnte nicht gefunden werden.");
+    }
+});
+
+
+function renderDeMaskedPreview(rawText) {
+    let finalDraft = rawText;
+
+    // Ersetze Platzhalter durch echte Werte aus deiner maskMap
+    if (maskMap.name) {
+        finalDraft = finalDraft.replace(/\[NAME_MASKED\]/g, maskMap.name.split(',')[0]); // Nutzt den ersten Namen/Vornamen
+    }
+    if (maskMap.email) {
+        finalDraft = finalDraft.replace(/\[EMAIL_MASKED\]/g, maskMap.email);
+    }
+    if (maskMap.phone) {
+        finalDraft = finalDraft.replace(/\[PHONE_MASKED\]/g, maskMap.phone);
+    }
+
+    // Ergebnis in das Textfeld der Vorschau schreiben
+    const previewArea = document.getElementById('motivation-full-text');
+    previewArea.value = finalDraft;
+    document.getElementById('motivation-preview-layer').style.display = 'block';
+}
+
+document.getElementById('btn-match').addEventListener('click', () => {
+    // Hier holst du den Text, den die KI generiert hat (oder deinen lokalen Entwurf)
+    const draftText = document.getElementById('motivation-full-text').value; 
+    
+    // De-Maskierung anwenden
+    renderDeMaskedPreview(draftText);
+});
+
 </script>
 </body>
 </html>
