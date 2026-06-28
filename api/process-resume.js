@@ -8,7 +8,7 @@ export default async function handler(req, res) {
         
         // Gemma-Inferenz-Konfiguration
         const model = ai.getGenerativeModel({ 
-            model: "gemma-4-31b-it", // Nutze ein stabiles Gemma-2 Modell
+            model: "gemma-4-31b-it", // Nutze ein stabiles Gemma-4 Modell
             generationConfig: {
                 temperature: 0.2,
                 topP: 0.95,
