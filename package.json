@@ -1,0 +1,24 @@
+{
+  "name": "atsconform",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Z31L1/atsconform.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Z31L1/atsconform/issues"
+  },
+  "homepage": "https://github.com/Z31L1/atsconform#readme",
+  "dependencies": {
+    "@google/genai": "^2.10.0"
+  }
+}
