@@ -43,6 +43,11 @@
     <textarea id="jd-ai-input" placeholder="Text der Stellenausschreibung erscheint hier..."></textarea>
     <button class="btn" id="btn-match">Übereinstimmungen prüfen & Text generieren</button>
     <div id="match-results"></div>
+    
+    <div id="motivation-preview-layer" style="display: none;">
+        <h3>Vorschau des generierten Entwurfs:</h3>
+        <textarea id="motivation-full-text" placeholder="Resultierender Text..."></textarea>
+    </div>
     </div>
 
     <script>
@@ -74,7 +79,6 @@
     
     const reader = new FileReader();
     reader.onload = async function(event) {
-        // 2. Jetzt das PDF für die Textextraktion parsen
         try {
             const pdf = await pdfjsLib.getDocument({data: new Uint8Array(event.target.result)}).promise;
             let fullText = "";
@@ -181,15 +185,12 @@
             return;
         }
         
-
     try {
         const firstBracket = jsonInput.indexOf('{');
         const lastBracket = jsonInput.lastIndexOf('}');
         const cleanJson = jsonInput.substring(firstBracket, lastBracket + 1);
         
         const data = JSON.parse(cleanJson);
-        
-        // 2. Explizite Übergabe des validierten Buffers
         await generateATSResume(data);
     } catch (err) {
         console.error("Fatal Parsing Error:", err);
@@ -197,7 +198,6 @@
     }
 });
 
-    // NEUE KERNFUNKTION: PDF-LIB AST INJECTION
     async function generateATSResume(data) {
         const file = document.getElementById('file-input').files[0];
         const arrayBuffer = await file.arrayBuffer();
@@ -205,26 +205,22 @@
         console.log("PdfBytes length:", pdfBytes.length);
         const { PDFDocument, rgb, StandardFonts } = PDFLib;
 
-        // 1. De-Maskierung der privaten Daten im lokalen Client-Kontext
         if (data.basics) {
             if (data.basics.name === "[NAME_MASKED]") data.basics.name = maskMap.name || "";
             if (data.basics.email === "[EMAIL_MASKED]") data.basics.email = maskMap.email || "";
             if (data.basics.phone === "[PHONE_MASKED]") data.basics.phone = maskMap.phone || "";
         }
 
-        // 2. Original-PDF in den Arbeitsspeicher laden
         const pdfDoc = await PDFDocument.load(pdfBytes);
         const pages = pdfDoc.getPages();
         const firstPage = pages[0]; 
 
-        // 3. Metadaten für den ATS-Parser setzen
         pdfDoc.setTitle('Lebenslauf ' + (data.basics?.name || 'Bewerber'));
         pdfDoc.setSubject('Bewerbungsunterlagen - Qualifiziertes Profil');
         pdfDoc.setAuthor(data.basics?.name || 'Bewerber');
         pdfDoc.setKeywords(data.skills && data.skills.length > 0 ? data.skills : ['Lebenslauf', 'Professional']);
         pdfDoc.setCreator('AI-Bridge-ATS Privacy Edition');
 
-        // 4. ATS-Ghost-Layer strukturieren
         const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
         let atsTextStream = `Lebenslauf von ${data.basics?.name || ''}\n`;
         atsTextStream += `Skills: ${data.skills ? data.skills.join(', ') : ''}\n`;
@@ -236,19 +232,17 @@
             });
         }
 
-        // 5. Injektion des unsichtbaren Textes (Opacity 0)
         firstPage.drawText(atsTextStream, {
             x: 10,
             y: firstPage.getHeight() - 30,
             size: 5, 
             font: font,
             color: rgb(0, 0, 0),
-            opacity: 0.01, // Nahezu unsichtbar, aber zu 100% maschinenlesbar
+            opacity: 0.01, 
             lineHeight: 2,
             maxWidth: firstPage.getWidth() - 20
         });
 
-        // 6. Speichern und Download triggern
         const modifiedPdfBytes = await pdfDoc.save();
         const blob = new Blob([modifiedPdfBytes], { type: 'application/pdf' });
         const link = document.createElement('a');
@@ -257,214 +251,189 @@
         link.click();
     }
 
-    // SCRIPT FÜR MATCHING UND MOTIVATIONSSCHREIBEN
-    //
-    //
-    //
-    //
-    //
-
     let cvUploaded = false;
-let jdUploaded = false;
-const btnMask = document.getElementById('btn-motivation-mask-names');
+    let jdUploaded = false;
+    const btnMask = document.getElementById('btn-motivation-mask-names');
 
-// Button initial sperren
-btnMask.disabled = true;
+    btnMask.disabled = true;
 
-
-// Funktion zum Prüfen des Button-Status
-function checkMotivationReady() {
-    if (cvUploaded && jdUploaded) {
-        btnMask.disabled = false;
-    }
-}
-
-// 1. Lebenslauf Upload Listener (im Motivations-Modul)
-document.getElementById('motivation-file-input').addEventListener('change', (e) => {
-    if (e.target.files.length > 0) {
-        cvUploaded = true;
-        checkMotivationReady();
-    }
-});
-
-// 2. Stellenausschreibung Upload Listener
-document.getElementById('jd-file-input').addEventListener('change', (e) => {
-    if (e.target.files.length > 0) {
-        jdUploaded = true;
-        checkMotivationReady();
-    }
-});
-
-document.getElementById('motivation-file-input').addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file || file.type !== 'application/pdf') {
-        alert("Bitte eine gültige PDF-Datei auswählen!");
-        return;
-    }
-    
-    const reader = new FileReader();
-    reader.onload = async function(event) {
-        // 2. Jetzt das PDF für die Textextraktion parsen
-        try {
-            const pdf = await pdfjsLib.getDocument({data: new Uint8Array(event.target.result)}).promise;
-            let fullText = "";
-            
-            for (let i = 1; i <= pdf.numPages; i++) {
-                const page = await pdf.getPage(i);
-                const content = await page.getTextContent();
-                
-                const lines = {};
-                content.items.forEach(item => {
-                    const y = Math.round(item.transform[5] / 5) * 5;
-                    if (!lines[y]) lines[y] = [];
-                    lines[y].push(item);
-                });
-
-                const sortedY = Object.keys(lines).sort((a, b) => b - a);
-                sortedY.forEach(y => {
-                    lines[y].sort((a, b) => a.transform[4] - b.transform[4]);
-                    fullText += lines[y].map(item => item.str).join(" ") + " ";
-                });
-                fullText += "\n";
-            }
-            document.getElementById('motivation-ai-input').value = anonymize(fullText);
-        
-        } catch (err) {
-            console.error("PDF Parsing Fehlgeschlagen:", err);
-            alert("Fehler beim Lesen des PDFs.");
+    function checkMotivationReady() {
+        if (cvUploaded && jdUploaded) {
+            btnMask.disabled = false;
         }
-    };
-    reader.readAsArrayBuffer(file);
-});
+    }
 
-document.getElementById('btn-motivation-mask-names').addEventListener('click', () => {
-        const jdInput = document.getElementById('jd-ai-input');
-        const aiInput = document.getElementById('motivation-ai-input');
-        const namesToMask = document.getElementById('motivation-name-input').value.split(',');
-        maskMap.name = namesToMask.join(','); 
-        
-        [aiInput, jdInput].forEach(inputField => {
-        if (!inputField || !inputField.value) return;
-        
-        let text = inputField.value;
+    document.getElementById('motivation-file-input').addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            cvUploaded = true;
+            checkMotivationReady();
+        }
+    });
 
-        // E-Mail und Telefon maskieren, falls vorhanden
+    document.getElementById('jd-file-input').addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            jdUploaded = true;
+            checkMotivationReady();
+        }
+    });
+
+    document.getElementById('motivation-file-input').addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file || file.type !== 'application/pdf') {
+            alert("Bitte eine gültige PDF-Datei auswählen!");
+            return;
+        }
+        
+        const reader = new FileReader();
+        reader.onload = async function(event) {
+            try {
+                const pdf = await pdfjsLib.getDocument({data: new Uint8Array(event.target.result)}).promise;
+                let fullText = "";
+                
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const content = await page.getTextContent();
+                    
+                    const lines = {};
+                    content.items.forEach(item => {
+                        const y = Math.round(item.transform[5] / 5) * 5;
+                        if (!lines[y]) lines[y] = [];
+                        lines[y].push(item);
+                    });
+
+                    const sortedY = Object.keys(lines).sort((a, b) => b - a);
+                    sortedY.forEach(y => {
+                        lines[y].sort((a, b) => a.transform[4] - b.transform[4]);
+                        fullText += lines[y].map(item => item.str).join(" ") + " ";
+                    });
+                    fullText += "\n";
+                }
+                document.getElementById('motivation-ai-input').value = anonymize(fullText);
+            
+            } catch (err) {
+                console.error("PDF Parsing Fehlgeschlagen:", err);
+                alert("Fehler beim Lesen des PDFs.");
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    });
+
+    document.getElementById('btn-motivation-mask-names').addEventListener('click', () => {
+            const jdInput = document.getElementById('jd-ai-input');
+            const aiInput = document.getElementById('motivation-ai-input');
+            const namesToMask = document.getElementById('motivation-name-input').value.split(',');
+            maskMap.name = namesToMask.join(','); 
+            
+            [aiInput, jdInput].forEach(inputField => {
+            if (!inputField || !inputField.value) return;
+            
+            let text = inputField.value;
+
+            if (maskMap.email) {
+                const emailRegex = new RegExp(maskMap.email, 'gi');
+                text = text.replace(emailRegex, "[EMAIL_MASKED]");
+            }
+            if (maskMap.phone) {
+                const phoneRegex = new RegExp(maskMap.phone, 'gi');
+                text = text.replace(phoneRegex, "[PHONE_MASKED]");
+            }
+            
+            namesToMask.forEach(name => {
+                const trimmedName = name.trim();
+                if (trimmedName.length > 0) {
+                    const regex = new RegExp(trimmedName, 'gi');
+                    text = text.replace(regex, "[NAME_MASKED]");
+                }
+            });
+            
+            inputField.value = text;
+        });
+    });
+
+    // CODEVERDOPPELUNG ENTGEGEN JEDER LOGIK BEIBEHALTEN:
+    document.getElementById('btn-match').addEventListener('click', async () => {
+        const cvText = document.getElementById('motivation-ai-input').value; 
+        const jdText = document.getElementById('jd-ai-input').value; 
+
+        if (!cvText || !jdText) {
+            alert("Bitte stelle sicher, dass sowohl Lebenslauf als auch JD extrahiert wurden!");
+            return;
+        }
+
+        const combinedContent = `--- ANALYSE-REPORT ---\n\n` +
+                                `[LEBENSLAUF DATEN]\n${cvText}\n\n` +
+                                `[STELLENAUSSCHREIBUNG]\n${jdText}`;
+        
+        showPreview(combinedContent);
+    });
+
+    function showPreview(text) {
+        document.getElementById('motivation-full-text').value = text;
+        document.getElementById('motivation-preview-layer').style.display = 'block';
+    }
+
+    document.getElementById('jd-file-input').addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file || file.type !== 'application/pdf') return;
+
+        const reader = new FileReader();
+        reader.onload = async function(event) {
+            try {
+                const pdf = await pdfjsLib.getDocument({data: new Uint8Array(event.target.result)}).promise;
+                let jdText = "";
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const content = await page.getTextContent();
+                    jdText += content.items.map(item => item.str).join(" ") + "\n";
+                }
+                document.getElementById('jd-ai-input').value = jdText;
+            } catch (err) {
+                console.error("JD Parsing failed:", err);
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    });
+
+    document.getElementById('btn-match').addEventListener('click', () => {
+        const cvContent = document.getElementById('motivation-ai-input').value; 
+        const jdContent = document.getElementById('jd-ai-input').value; 
+
+        if (!cvContent || !jdContent) {
+            alert("Fehler: Eines der Dokumente ist noch nicht geladen.");
+            return;
+        }
+
+        const previewArea = document.getElementById('motivation-full-text');
+        if (previewArea) {
+            previewArea.value = "--- LEBENSLAUF ---\n" + cvContent + "\n\n--- STELLENAUSSCHREIBUNG ---\n" + jdContent;
+            document.getElementById('motivation-preview-layer').style.display = 'block';
+        } else {
+            console.error("Preview-Layer konnte nicht gefunden werden.");
+        }
+    });
+
+    function renderDeMaskedPreview(rawText) {
+        let finalDraft = rawText;
+
+        if (maskMap.name) {
+            finalDraft = finalDraft.replace(/\[NAME_MASKED\]/g, maskMap.name.split(',')[0]); 
+        }
         if (maskMap.email) {
-            const emailRegex = new RegExp(maskMap.email, 'gi');
-            text = text.replace(emailRegex, "[EMAIL_MASKED]");
+            finalDraft = finalDraft.replace(/\[EMAIL_MASKED\]/g, maskMap.email);
         }
         if (maskMap.phone) {
-            const phoneRegex = new RegExp(maskMap.phone, 'gi');
-            text = text.replace(phoneRegex, "[PHONE_MASKED]");
+            finalDraft = finalDraft.replace(/\[PHONE_MASKED\]/g, maskMap.phone);
         }
-        
-        // Namen maskieren[cite: 3]
-        namesToMask.forEach(name => {
-            const trimmedName = name.trim();
-            if (trimmedName.length > 0) {
-                const regex = new RegExp(trimmedName, 'gi');
-                text = text.replace(regex, "[NAME_MASKED]");
-            }
-        });
-        
-        inputField.value = text;
-    });
-});
 
-document.getElementById('btn-match').addEventListener('click', async () => {
-    const cvText = document.getElementById('motivation-ai-input').value; // Lebenslauf-Daten
-    const jdText = document.getElementById('jd-ai-input').value; // JD-Daten
-
-    if (!cvText || !jdText) {
-        alert("Bitte stelle sicher, dass sowohl Lebenslauf als auch JD extrahiert wurden!");
-        return;
-    }
-
-    // Kombinierte Anzeige in der Vorschau
-    const combinedContent = `--- ANALYSE-REPORT ---\n\n` +
-                            `[LEBENSLAUF DATEN]\n${cvText}\n\n` +
-                            `[STELLENAUSSCHREIBUNG]\n${jdText}`;
-    
-    // Aufruf der Preview-Funktion
-    showPreview(combinedContent);
-});
-
-// Stelle sicher, dass die showPreview-Funktion existiert
-function showPreview(text) {
-    document.getElementById('motivation-full-text').value = text;
-    document.getElementById('motivation-preview-layer').style.display = 'block';
-}
-
-document.getElementById('jd-file-input').addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file || file.type !== 'application/pdf') return;
-
-    const reader = new FileReader();
-    reader.onload = async function(event) {
-        try {
-            const pdf = await pdfjsLib.getDocument({data: new Uint8Array(event.target.result)}).promise;
-            let jdText = "";
-            for (let i = 1; i <= pdf.numPages; i++) {
-                const page = await pdf.getPage(i);
-                const content = await page.getTextContent();
-                jdText += content.items.map(item => item.str).join(" ") + "\n";
-            }
-            // Zuweisung an das Feld im Motivations-Container
-            document.getElementById('jd-ai-input').value = jdText;
-        } catch (err) {
-            console.error("JD Parsing fehlgeschlagen:", err);
-        }
-    };
-    reader.readAsArrayBuffer(file);
-});
-
-   document.getElementById('btn-match').addEventListener('click', () => {
-    const cvContent = document.getElementById('motivation-ai-input').value; // Extrahiert aus dem Lebenslauf-Teil
-    const jdContent = document.getElementById('jd-ai-input').value; // Extrahiert aus der JD
-
-    if (!cvContent || !jdContent) {
-        alert("Fehler: Eines der Dokumente ist noch nicht geladen.");
-        return;
-    }
-
-    // Anzeige im Preview-Layer (Voraussetzung: motivation-preview-layer existiert im HTML)
-    const previewArea = document.getElementById('motivation-full-text');
-    if (previewArea) {
-        previewArea.value = "--- LEBENSLAUF ---\n" + cvContent + "\n\n--- STELLENAUSSCHREIBUNG ---\n" + jdContent;
+        const previewArea = document.getElementById('motivation-full-text');
+        previewArea.value = finalDraft;
         document.getElementById('motivation-preview-layer').style.display = 'block';
-    } else {
-        console.error("Preview-Layer konnte nicht gefunden werden.");
-    }
-});
-
-
-function renderDeMaskedPreview(rawText) {
-    let finalDraft = rawText;
-
-    // Ersetze Platzhalter durch echte Werte aus deiner maskMap
-    if (maskMap.name) {
-        finalDraft = finalDraft.replace(/\[NAME_MASKED\]/g, maskMap.name.split(',')[0]); // Nutzt den ersten Namen/Vornamen
-    }
-    if (maskMap.email) {
-        finalDraft = finalDraft.replace(/\[EMAIL_MASKED\]/g, maskMap.email);
-    }
-    if (maskMap.phone) {
-        finalDraft = finalDraft.replace(/\[PHONE_MASKED\]/g, maskMap.phone);
     }
 
-    // Ergebnis in das Textfeld der Vorschau schreiben
-    const previewArea = document.getElementById('motivation-full-text');
-    previewArea.value = finalDraft;
-    document.getElementById('motivation-preview-layer').style.display = 'block';
-}
-
-document.getElementById('btn-match').addEventListener('click', () => {
-    // Hier holst du den Text, den die KI generiert hat (oder deinen lokalen Entwurf)
-    const draftText = document.getElementById('motivation-full-text').value; 
-    
-    // De-Maskierung anwenden
-    renderDeMaskedPreview(draftText);
-});
+    document.getElementById('btn-match').addEventListener('click', () => {
+        const draftText = document.getElementById('motivation-full-text').value; 
+        renderDeMaskedPreview(draftText);
+    });
 
 </script>
 </body>

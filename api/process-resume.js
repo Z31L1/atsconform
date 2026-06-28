@@ -1,12 +1,12 @@
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Methode nicht erlaubt. Verwende POST.' });
+        return res.status(405).json({ error: 'Methode nicht erlaubt.' });
     }
 
     const { text, mode } = req.body; 
 
     if (!text) {
-        return res.status(400).json({ error: 'Fehlender Text-Payload aus dem Frontend.' });
+        return res.status(400).json({ error: 'Fehlender Text-Payload.' });
     }
 
     try {
@@ -15,14 +15,12 @@ export default async function handler(req, res) {
             throw new Error("GEMINI_API_KEY fehlt in den Umgebungsvariablen.");
         }
 
-        const modelId = "gemma-4-31b-it";
+        // Wechsel auf ein natives Gemini-Modell, da Gemma kein responseSchema/systemInstruction via API unterstützt
+        const modelId = "gemini-1.5-flash";
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`;
 
-        const generationConfig = {
-            temperature: 0.1,
-            thinkingConfig: {
-                thinkingLevel: "HIGH"
-            }
+        let generationConfig = {
+            temperature: 0.1
         };
 
         let systemPromptText = "";
@@ -76,9 +74,14 @@ export default async function handler(req, res) {
             };
 
         } else if (mode === 'matching') {
-            systemPromptText = `Du bist ein präziser HR-Analyst. Analysiere den bereitgestellten Text (Lebenslauf / Jobanforderungen) und erstelle eine Matching-Analyse.\nDu musst EXAKT das folgende Textformat für deine Ausgabe einhalten. Ersetze die Werte in den eckigen Klammern durch die realen Analyseergebnisse. Verwende keine JavaScript-Variablen-Platzhalter wie \${...} in deiner finalen Ausgabe, sondern reinen Text!\n\n--- MATCHING-ANALYSE ---\nÜbereinstimmung: [Berechneter Prozentwert]%\n\nGEFUNDENE SKILLS:\n[Liste der gefundenen Skills, kommagetrennt]\n\nFEHLENDE SKILLS:\n[Liste der fehlenden Skills, kommagetrennt]\n\nVORSCHLAG FÜR MOTIVATIONSSCHREIBEN:\n[Generierter, professioneller Text für das Motivationsschreiben]`;
+            systemPromptText = `Du bist ein präziser HR-Analyst. Analysiere den bereitgestellten Text und erstelle eine Matching-Analyse.\nDu musst EXAKT das folgende Textformat für deine Ausgabe einhalten. Ersetze die Werte in den eckigen Klammeln durch die realen Analyseergebnisse.\n\n--- MATCHING-ANALYSE ---\nÜbereinstimmung: [Berechneter Prozentwert]%\n\nGEFUNDENE SKILLS:\n[Liste der gefundenen Skills, kommagetrennt]\n\nFEHLENDE SKILLS:\n[Liste der fehlenden Skills, kommagetrennt]\n\nVORSCHLAG FÜR MOTIVATIONSSCHREIBEN:\n[Generierter Text]`;
+            
+            // Native Reasoning-Kette aktivieren
+            generationConfig.thinkingConfig = {
+                thinkingLevel: "HIGH"
+            };
         } else {
-            return res.status(400).json({ error: "Ungültiger Modus. Erlaubt sind 'lebenslauf' oder 'matching'." });
+            return res.status(400).json({ error: "Ungültiger Modus." });
         }
 
         const response = await fetch(url, {
@@ -108,7 +111,7 @@ export default async function handler(req, res) {
         const data = await response.json();
         
         if (!data.candidates || data.candidates.length === 0) {
-            throw new Error("Ungültige API-Response: Keine Inferenz-Kandidaten vorhanden.");
+            throw new Error("Keine Inferenz-Kandidaten in der API-Antwort.");
         }
 
         const llmResponseText = data.candidates[0].content.parts[0].text;
@@ -124,6 +127,6 @@ export default async function handler(req, res) {
 
     } catch (error) {
         console.error("Kritischer Backend Fehler:", error.message);
-        return res.status(500).json({ error: error.message || "Interne Server-Anomalie" });
+        return res.status(500).json({ error: error.message });
     }
 }
